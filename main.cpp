@@ -27,6 +27,7 @@ extern "C"
 
 #define PORT 1212
 #define Wifi 1
+#define nahravaj 0
 
 using namespace std;
 using namespace cv;
@@ -133,11 +134,9 @@ void sigctrl(int param);
 void sigpipe(int param);
 int main(int argc, char** argv)
 {
-	int index_last = -1;
 	int imageChooseMain=0;
 	Mat imgHSV;	
-	Mat imgThresholded;
-	struct timespec tstart={0,0}, tend={0,0};	
+	Mat imgThresholded;	
         double P = 1.2;
 	double I = 0;
 	double sum=0;
@@ -145,11 +144,12 @@ int main(int argc, char** argv)
 	double e;
 	double akcia;
 	double max_akcia = 200;
+	int data[6];
+	int codec = CV_FOURCC('M', 'J', 'P', 'G');
 	camera = cvCaptureFromCAM(0);
 	cvSetCaptureProperty( camera, CV_CAP_PROP_FRAME_WIDTH, sirka);
 	cvSetCaptureProperty( camera, CV_CAP_PROP_FRAME_HEIGHT, vyska);
 	initRobot();
-	
 	if(Wifi == 1){
 	        struct sockaddr_in server;	
    	        if ((serversock = socket(AF_INET, SOCK_STREAM, 0)) == -1) 		quit("socket() failed", 1);
@@ -171,13 +171,26 @@ int main(int argc, char** argv)
 	semInit(sem_id,1,1);
 
 	pthread_t vlaknoKey;
+
       pthread_create(&vlaknoKey,NULL,&readKey,NULL);
 	signal(SIGINT, sigctrl);
 	pthread_t vlaknoImg;
         pthread_create(&vlaknoImg,NULL,&getImg,NULL);
 	int index;
 	int max;
+
+		VideoWriter video("capture.avi",codec, 20, cvSize((int)sirka,(int)vyska) );
+		VideoWriter video1("test.avi",codec, 20, cvSize((int)sirka,(int)vyska) );
+		// Check if the video was opened
+    		if(!video.isOpened() || !video1.isOpened()){
+        		printf("problem s otvorenim suboru");
+        		return -1;
+    		}
+	
 	while(zap) {
+		if(waitKey(1) == 27) break;
+		getULT(&data[0]);
+		//printf("%d %d %d %d %d %d\n",data[0],data[1],data[2],data[3],data[4],data[5]);
 		semWait(sem_id,0);
 		imageChooseMain = imageChoose;
 		semPost(sem_id,0);
@@ -202,7 +215,7 @@ int main(int argc, char** argv)
 					index = i;
 	    			}
         		}  
-        		if(Wifi == 1) drawContours(test, contours, index, Scalar(255), CV_FILLED);  
+        		if(Wifi == 1 || nahravaj == 1) drawContours(test, contours, index, Scalar(255), CV_FILLED);  
 			Rect r;
 			Point center; 
         		if (contours.size() >= 1 && index != -1){  
@@ -210,13 +223,14 @@ int main(int argc, char** argv)
 	    			if(max>2500){
 					center.x = r.x + (r.width/2);
                                         center.y = r.y+ r.height;
-					vzdialenost = 1.1312318*center.y+3.21945;
-					if(Wifi == 1){
+					vzdialenost = (int)(((1.1-0.292)/tan(0.1359+0.00180333*(240-center.y)))*100);
+//					printf("%d\n",vzdialenost);
+					if(Wifi == 1 || nahravaj == 1){
 	    					rectangle(imgOrig, Point(r.x,r.y),Point(r.x+r.width,r.y+r.height), CV_RGB(0, 255, 0), 3, 8, 0); 
 						circle(imgOrig,center,5,Scalar( 0, 0, 255 ),-1,8);
 						char text[20];
-	                                	sprintf(text, "%d,%d,%d", center.x,center.y,vzdialenost);
-						putText(imgOrig, text, Point(center.x+2,center.y), FONT_HERSHEY_COMPLEX_SMALL, 0.8, cvScalar(255,0,0), 1, CV_AA);  
+	                                	sprintf(text, "%d,%d,%f", center.x,center.y,vzdialenost);
+						putText(imgOrig, text, Point(center.x+2,center.y), FONT_HERSHEY_COMPLEX_SMALL, 0.8, cvScalar(255,0,0), 1, CV_AA);
            				}
 					pozicia_X = center.x;
 				}
@@ -225,22 +239,39 @@ int main(int argc, char** argv)
 				}  
 			}
 			if(Wifi == 1) comSocket();
-			if (vzdialenost > 120 && vzdialenost != -1){
-				e = 160-pozicia_X;
-				sum+= e*I;
-				if(sum > 150) sum=100;
-				else if(sum < -150) sum = -100;
-				akcia = P*e+sum;
-				if(akcia > max_akcia) akcia = max_akcia;
-				else if(akcia < -max_akcia) akcia = -max_akcia;
-				if (akcia < 0){
-					motors(-(int)(max_akcia+akcia),-(int)(max_akcia),(int)(max_akcia),(int)(max_akcia));
+			if(nahravaj == 1){
+				video << imgOrig;
+				video1 << test;
+			}
+			if(data[1] < 20 || data[0] < 20) m_(90,200);
+			else if(data[3] < 20 || data[4] < 20) m_(270,200);
+			else if(data[2] < 20) m_(180,200);
+			else{
+			if (vzdialenost > 230 && vzdialenost != -1){
+//				printf("vpred");
+				if(data[1] > 50 && data[2] > 40 && data[3] > 50){
+					e = 160-pozicia_X;
+					sum+= e*I;
+					if(sum > 150) sum=100;
+					else if(sum < -150) sum = -100;
+					akcia = P*e+sum;
+					if(akcia > max_akcia) akcia = max_akcia;
+					else if(akcia < -max_akcia) akcia = -max_akcia;
+					if (akcia < 0)	motors(-(int)(max_akcia+akcia),-(int)(max_akcia),(int)(max_akcia),(int)(max_akcia));
+					else		motors(-(int)(max_akcia),-(int)(max_akcia),(int)(max_akcia),(int)(max_akcia-akcia));
+				}
+				else if((data[1] < 50 || data[2] <= 40) && data[4] > 60){
+					m_(90,200);
+				}
+				else if((data[3] < 50 || data[2] <= 40) && data[0] >60){
+					m_(270,200);
 				}
 				else{
-					motors(-(int)(max_akcia),-(int)(max_akcia),(int)(max_akcia),(int)(max_akcia-akcia));
+					motors(0,0,0,0);
 				}
 			}
 			else if(vzdialenost == -1){
+//				printf("not see\n");
 				e = 160-pozicia_X;
 				if(e > 0){
 					motors(-120,-120,-120,-120);
@@ -249,10 +280,13 @@ int main(int argc, char** argv)
 					motors(120,120,120,120);
 				}
 			}
-			else if(vzdialenost < 70){
-				motors(150,150,-150,-150);
+			else if(vzdialenost < 200){
+//				printf("vzad\n");
+				if(data[5] > 30) m_(180,180);
+				else	         motors(0,0,0,0);
 			}
 			else {
+				printf("Kalib\n");
 				e = 160 - pozicia_X;
 				if(e > 70 || e < -70){
 					sum_Kalib+= e*0.035;
@@ -272,6 +306,7 @@ int main(int argc, char** argv)
 					sum_Kalib=0;
 					motors(0,0,0,0);
 				}
+			}
 			}
 		}
 	}
